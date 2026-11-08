@@ -39,6 +39,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _isAccessibilityEnabled = false;
   bool _isBatteryIgnored = false;
 
+  bool _wakeOnPowerInstant = true;
   bool _wakeOnDoubleTap = true;
   bool _wakeOnTripleTap = false;
   bool _wakeOnMultiTouch = true;
@@ -82,6 +83,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             (data['isAccessibilityEnabled'] as bool?) ?? false;
         _isBatteryIgnored = (data['isBatteryIgnored'] as bool?) ?? false;
 
+        _wakeOnPowerInstant = (s['wakeOnPowerInstant'] as bool?) ?? true;
         _wakeOnDoubleTap = (s['wakeOnDoubleTap'] as bool?) ?? true;
         _wakeOnTripleTap = (s['wakeOnTripleTap'] as bool?) ?? false;
         _wakeOnMultiTouch = (s['wakeOnMultiTouch'] as bool?) ?? true;
@@ -98,6 +100,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _saveSettings() async {
     await _channel.invokeMethod('saveSettings', {
+      'wakeOnPowerInstant': _wakeOnPowerInstant,
       'wakeOnDoubleTap': _wakeOnDoubleTap,
       'wakeOnTripleTap': _wakeOnTripleTap,
       'wakeOnMultiTouch': _wakeOnMultiTouch,
@@ -297,12 +300,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               style: TextStyle(fontSize: 13, color: Colors.white70),
             ),
             const SizedBox(height: 8),
-            const SwitchListTile(
+            SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              value: true,
-              onChanged: null,
-              title: Text('Кнопка питания (Power)'),
-              subtitle: Text('Всегда активна для гарантированного возврата'),
+              value: _wakeOnPowerInstant,
+              onChanged: (v) {
+                setState(() => _wakeOnPowerInstant = v);
+                _saveSettings();
+              },
+              title: const Text('Кнопка питания: 1 нажатие (Мгновенное пробуждение)'),
+              subtitle: Text(
+                _wakeOnPowerInstant
+                    ? '1 нажатие: экран моргает и сразу загорается уже без шторки'
+                    : 'Стандартно: 1 нажатие гасит экран, 2-е нажатие включает экран',
+              ),
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
@@ -403,9 +413,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 _saveSettings();
               },
               title: const Text('Пробуждать при входящем звонке'),
-              subtitle: const Text(
-                'Автоматически снимать черный экран при вызове',
-              ),
+              subtitle: const Text('Автоматически снимать черный экран при вызове'),
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
@@ -415,9 +423,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 _saveSettings();
               },
               title: const Text('Индикатор программного отключения'),
-              subtitle: const Text(
-                'Тусклая плашка, меняющая позицию раз в 20 сек (защита OLED)',
-              ),
+              subtitle: const Text('Тусклая плашка, меняющая позицию раз в 20 сек (защита OLED)'),
             ),
           ],
         ),

@@ -1,6 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:label="@string/app_name"
@@ -24,7 +25,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Accessibility Service: основное ядро отрисовки черного экрана -->
         <service
             android:name=".BlackScreenAccessibilityService"
             android:label="@string/accessibility_service_label"
@@ -40,7 +40,6 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- Quick Settings Tile: кнопка в шторке быстрых настроек -->
         <service
             android:name=".BlackScreenTileService"
             android:label="@string/tile_label"

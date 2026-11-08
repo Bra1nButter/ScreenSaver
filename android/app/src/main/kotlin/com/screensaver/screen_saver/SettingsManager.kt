@@ -7,6 +7,10 @@ class SettingsManager(context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("screen_saver_prefs", Context.MODE_PRIVATE)
 
+    var wakeOnPowerInstant: Boolean
+        get() = prefs.getBoolean("wakeOnPowerInstant", true)
+        set(value) = prefs.edit().putBoolean("wakeOnPowerInstant", value).apply()
+
     var wakeOnDoubleTap: Boolean
         get() = prefs.getBoolean("wakeOnDoubleTap", true)
         set(value) = prefs.edit().putBoolean("wakeOnDoubleTap", value).apply()
@@ -41,6 +45,7 @@ class SettingsManager(context: Context) {
 
     fun toMap(): Map<String, Any> {
         return mapOf(
+            "wakeOnPowerInstant" to wakeOnPowerInstant,
             "wakeOnDoubleTap" to wakeOnDoubleTap,
             "wakeOnTripleTap" to wakeOnTripleTap,
             "wakeOnMultiTouch" to wakeOnMultiTouch,
@@ -53,6 +58,7 @@ class SettingsManager(context: Context) {
     }
 
     fun updateFromMap(map: Map<*, *>) {
+        (map["wakeOnPowerInstant"] as? Boolean)?.let { wakeOnPowerInstant = it }
         (map["wakeOnDoubleTap"] as? Boolean)?.let { wakeOnDoubleTap = it }
         (map["wakeOnTripleTap"] as? Boolean)?.let { wakeOnTripleTap = it }
         (map["wakeOnMultiTouch"] as? Boolean)?.let { wakeOnMultiTouch = it }

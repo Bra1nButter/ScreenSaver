@@ -13,6 +13,7 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.TypedValue
 import android.view.Gravity
@@ -52,35 +53,35 @@ class BlackScreenAccessibilityService : AccessibilityService() {
     private var isTestMode: Boolean = false
     private var testRemainingSec: Int = 0
 
-    // Переменные для распознавания жестов
     private var lastTapTime: Long = 0L
     private var tapCount: Int = 0
     private var downX: Float = 0f
     private var downY: Float = 0f
     private var maxPointersInGesture: Int = 0
 
-    // Ресивер физического отключения экрана (кнопка питания)
+    // Ресивер кнопки питания (выключение физического экрана)
     private val screenOffReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == Intent.ACTION_SCREEN_OFF && isOverlayShowing) {
+                val instantWake = settings.wakeOnPowerInstant
                 hideOverlay()
+                if (instantWake) {
+                    wakeUpScreenImmediately()
+                }
             }
         }
     }
 
-    // Периодическая задача: таймер теста, проверка входящего звонка и защита OLED от выгорания
     private var tickCounter = 0
     private val periodicTask = object : Runnable {
         override fun run() {
             if (!isOverlayShowing) return
 
-            // 1. Проверка входящего звонка (если включено в настройках)
             if (settings.wakeOnCall && isIncomingCallActive()) {
                 hideOverlay()
                 return
             }
 
-            // 2. Логика тестового режима (обратный отсчет 10 секунд)
             if (isTestMode) {
                 testRemainingSec--
                 if (testRemainingSec <= 0) {
@@ -90,7 +91,6 @@ class BlackScreenAccessibilityService : AccessibilityService() {
                 updateIndicatorText()
             }
 
-            // 3. Сдвиг индикатора каждые 20 секунд (защита OLED от выгорания)
             tickCounter++
             if (tickCounter % 20 == 0) {
                 moveIndicatorRandomly()
@@ -114,9 +114,7 @@ class BlackScreenAccessibilityService : AccessibilityService() {
         }
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Дополнительных действий на события UI не требуется
-    }
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
 
     override fun onInterrupt() {
         hideOverlay()
@@ -144,8 +142,7 @@ class BlackScreenAccessibilityService : AccessibilityService() {
                     applyImmersiveFlags(overlayView!!)
                     windowManager?.updateViewLayout(overlayView, overlayParams)
                     moveIndicatorRandomly()
-                } catch (_: Exception) {
-                }
+                } catch (_: Exception) {}
             }
         }
     }
@@ -219,8 +216,7 @@ class BlackScreenAccessibilityService : AccessibilityService() {
             if (view != null) {
                 try {
                     windowManager?.removeViewImmediate(view)
-                } catch (_: Exception) {
-                }
+                } catch (_: Exception) {}
             }
             overlayView = null
             indicatorView = null
@@ -228,6 +224,25 @@ class BlackScreenAccessibilityService : AccessibilityService() {
             isOverlayShowing = false
             isTestMode = false
         }
+    }
+
+    // Мгновенное пробуждение экрана при выключении (1 нажатие)
+    private fun wakeUpScreenImmediately() {
+        mainHandler.postDelayed({
+            try {
+                val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                @Suppress("DEPRECATION")
+                val wakeLock = pm.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                            PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                            PowerManager.ON_AFTER_RELEASE,
+                    "screensaver:instant_wake"
+                )
+                wakeLock.acquire(1500L)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }, 120L)
     }
 
     private fun createOverlayLayoutParams(): WindowManager.LayoutParams {
@@ -247,7 +262,6 @@ class BlackScreenAccessibilityService : AccessibilityService() {
             PixelFormat.OPAQUE
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            // Программное снижение подсветки экрана до минимума для этого окна
             screenBrightness = 0.0f
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -355,13 +369,11 @@ class BlackScreenAccessibilityService : AccessibilityService() {
                     val dy = event.rawY - downY
                     val distance = hypot(dx, dy)
 
-                    // Проверка свайпа
                     if (settings.wakeOnSwipe && distance >= dpToPx(110f)) {
                         hideOverlay()
                         return true
                     }
 
-                    // Проверка двойного / тройного тапа
                     if (distance < dpToPx(24f)) {
                         val now = SystemClock.uptimeMillis()
                         if (now - lastTapTime <= 380L) {
@@ -409,8 +421,7 @@ class BlackScreenAccessibilityService : AccessibilityService() {
         hideOverlay()
         try {
             unregisterReceiver(screenOffReceiver)
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
         instance = null
         super.onDestroy()
     }
