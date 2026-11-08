@@ -1,18 +1,20 @@
 # Техническая документация ScreenSaver
 
-## 1. Механизм внутриприложенческого обновления (OTA)
+## 1. Архитектура решения
 
-1. При запуске приложение запрашивает `https://api.github.com/repos/Bra1nButter/ScreenSaver/releases/latest`.
-2. Если версия `tag_name` на GitHub выше текущей (`PackageManager.getPackageInfo`), отображается карточка обновления.
-3. Скачивание идет во временный файл `.part` внутри `cacheDir/updates` с проверкой целостности.
-4. Нативный `ApkFileProvider` формирует `content://` URI и запускает системный установщик `application/vnd.android.package-archive`.
-5. Если разрешение `REQUEST_INSTALL_PACKAGES` еще не выдано, открывается системное окно разрешения, а после возврата пользователя в приложение установка запускается автоматически в `MainActivity.onResume()`.
+1. **Flutter UI (`lib/main.dart`)**:
+   - Адаптивный мобильный интерфейс (Material 3 Dark), оптимизированный под управление одной рукой и узкие экраны.
+   - Пошаговый мастер снятия блокировки `RESTRICTED_SETTINGS` для Android 13+ (`sdkInt >= 33`).
+   - Встроенный OTA-клиент обновлений через GitHub Releases API (`Bra1nButter/ScreenSaver`).
 
-## 2. Настройка GitHub Secrets для единой подписи APK
+2. **Нативное ядро Android (`android/app/src/main/kotlin/com/screensaver/screen_saver/`)**:
+   - `MainActivity.kt` — обрабатывает вызовы `MethodChannel('com.screensaver/native')`, включая прямой вызов `Settings.ACTION_APPLICATION_DETAILS_SETTINGS` (`openAppDetailsSettings`) для снятия «Ограниченных настроек» в Android 13+.
+   - `BlackScreenAccessibilityService.kt` — полноэкранный слой `TYPE_ACCESSIBILITY_OVERLAY` с удержанием `FLAG_KEEP_SCREEN_ON`, минимальной яркостью подсветки (`0.0f`), обработкой мультитача, свайпов, кнопок громкости и мгновенным пробуждением по кнопке питания через `PowerManager.ACQUIRE_CAUSES_WAKEUP`.
+   - `BlackScreenTileService.kt` — системная плитка `TileService` в шторке быстрых настроек.
+   - `ApkFileProvider.kt` — собственный `ContentProvider` для передачи скачанных обновлений системному установщику пакетов.
 
-Чтобы сборки из GitHub Actions устанавливались поверх локальных сборок без конфликта подписей, добавьте в настройки репозитория (`Settings -> Secrets and variables -> Actions -> New repository secret`) 4 секрета:
+## 2. Выпуск обновлений (CI/CD)
 
-- `KEYSTORE_BASE64` — содержимое файла `keystore_base64.txt` (сгенерирован в корне проекта).
-- `STORE_PASSWORD` — `ScreenSaverStore2026`
-- `KEY_PASSWORD` — `ScreenSaverKey2026`
-- `KEY_ALIAS` — `screensaver`
+Для публикации новой версии выполните в PowerShell:
+
+    .\release.ps1 1.0.2 "Улучшена мобильная верстка и добавлен мастер настройки для Android 13+"

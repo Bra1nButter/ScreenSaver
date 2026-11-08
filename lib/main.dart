@@ -44,7 +44,16 @@ class ScreenSaverApp extends StatelessWidget {
         useMaterial3: true,
         brightness: Brightness.dark,
         colorSchemeSeed: Colors.tealAccent,
-        scaffoldBackgroundColor: const Color(0xFF0E1116),
+        scaffoldBackgroundColor: const Color(0xFF0B0E14),
+        cardTheme: CardThemeData(
+          color: const Color(0xFF151922),
+          elevation: 0,
+          margin: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: const BorderSide(color: Color(0xFF222836), width: 1),
+          ),
+        ),
       ),
       home: const HomePage(),
     );
@@ -63,6 +72,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   bool _isAccessibilityEnabled = false;
   bool _isBatteryIgnored = false;
+  int _sdkInt = 33;
   String _appVersion = '1.0.0';
   int _appBuildNumber = 1;
   String _updatesDir = '';
@@ -77,7 +87,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _wakeOnCall = true;
   bool _showIndicator = true;
 
-  // Состояние системы автообновления
   bool _isCheckingUpdate = false;
   bool _isDownloading = false;
   double _downloadProgress = 0.0;
@@ -131,6 +140,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         _isAccessibilityEnabled =
             (data['isAccessibilityEnabled'] as bool?) ?? false;
         _isBatteryIgnored = (data['isBatteryIgnored'] as bool?) ?? false;
+        _sdkInt = ((data['sdkInt'] as num?) ?? 33).toInt();
         _appVersion = (data['versionName'] as String?) ?? '1.0.0';
         _appBuildNumber = ((data['versionCode'] as num?) ?? 1).toInt();
         _updatesDir = (data['updatesDir'] as String?) ?? '';
@@ -172,14 +182,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _updateError = null;
     });
 
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 12);
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 12);
     try {
       final uri = Uri.parse(
         'https://api.github.com/repos/$kGithubOwner/$kGithubRepo/releases/latest',
       );
       final req = await client.getUrl(uri);
       req.headers.set(HttpHeaders.acceptHeader, 'application/vnd.github+json');
-      req.headers.set(HttpHeaders.userAgentHeader, 'ScreenSaver-Android-Updater');
+      req.headers
+          .set(HttpHeaders.userAgentHeader, 'ScreenSaver-Android-Updater');
 
       final resp = await req.close();
       final body = await resp.transform(utf8.decoder).join();
@@ -228,7 +240,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (selectedAsset == null) {
         setState(() => _isCheckingUpdate = false);
         if (!silent) {
-          _showSnack('Релиз $tagName найден, но APK еще собирается в GitHub Actions.');
+          _showSnack(
+            'Релиз $tagName найден, но APK еще собирается в GitHub Actions.',
+          );
         }
         return;
       }
@@ -344,14 +358,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       }
 
       final req = await client.getUrl(Uri.parse(update.downloadUrl));
-      req.headers.set(HttpHeaders.userAgentHeader, 'ScreenSaver-Android-Updater');
+      req.headers
+          .set(HttpHeaders.userAgentHeader, 'ScreenSaver-Android-Updater');
       final resp = await req.close();
 
       if (resp.statusCode != 200) {
         throw HttpException('Сервер вернул код ${resp.statusCode}');
       }
 
-      final contentLen = resp.contentLength > 0 ? resp.contentLength : update.fileSize;
+      final contentLen =
+          resp.contentLength > 0 ? resp.contentLength : update.fileSize;
       final sink = partFile.openWrite();
       int received = 0;
 
@@ -373,7 +389,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       await sink.close();
 
       if (received < 100 * 1024) {
-        throw const FileSystemException('Скачанный файл поврежден или слишком мал');
+        throw const FileSystemException(
+          'Скачанный файл поврежден или слишком мал',
+        );
       }
 
       if (targetFile.existsSync()) {
@@ -438,7 +456,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _triggerBlackScreen({required bool isTest}) async {
     if (!_isAccessibilityEnabled) {
       _showSnack(
-        'Сначала включите доступ в разделе «Специальные возможности»!',
+        'Сначала включите доступ в разделе «1. Разрешения»!',
       );
       return;
     }
@@ -446,7 +464,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final String method = isTest ? 'startTestMode' : 'startBlackScreen';
     final bool? ok = await _channel.invokeMethod<bool>(method);
     if (ok != true && mounted) {
-      _showSnack('Сервис еще не активен. Перезапустите переключатель в настройках.');
+      _showSnack(
+        'Сервис еще не активен. Перезапустите переключатель в настройках.',
+      );
     }
   }
 
@@ -455,7 +475,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted) return;
     if (res == 'manual') {
       _showSnack(
-        'Откройте шторку уведомлений -> Карандаш (Изменить) -> перетащите плитку «Экран ВЫКЛ».',
+        'Опустите шторку уведомлений -> Карандаш (Изменить) -> перетащите плитку «Экран ВЫКЛ».',
       );
     }
   }
@@ -474,19 +494,30 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        backgroundColor: const Color(0xFF0B0E14),
+        surfaceTintColor: Colors.transparent,
         title: Row(
           children: [
-            const Text('ScreenSaver'),
+            const Icon(Icons.dark_mode_outlined, color: Colors.tealAccent, size: 22),
+            const SizedBox(width: 8),
+            const Text(
+              'ScreenSaver',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
             const SizedBox(width: 8),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: Colors.tealAccent.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
+                color: Colors.tealAccent.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
                 'v$_appVersion',
-                style: const TextStyle(fontSize: 12, color: Colors.tealAccent),
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.tealAccent,
+                ),
               ),
             ),
           ],
@@ -495,26 +526,89 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           IconButton(
             tooltip: 'Обновить статус',
             onPressed: _refreshState,
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          if (_availableUpdate != null) ...[
-            _buildUpdateBannerCard(),
-            const SizedBox(height: 16),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+          children: [
+            if (_availableUpdate != null) ...[
+              _buildUpdateBannerCard(),
+              const SizedBox(height: 14),
+            ],
+            _buildActionsCard(),
+            const SizedBox(height: 14),
+            _buildPermissionsCard(),
+            const SizedBox(height: 14),
+            _buildWakeMethodsCard(),
+            const SizedBox(height: 14),
+            _buildExtraOptionsCard(),
+            const SizedBox(height: 14),
+            _buildVersionAndUpdateCard(),
           ],
-          _buildPermissionsCard(),
-          const SizedBox(height: 16),
-          _buildActionsCard(),
-          const SizedBox(height: 16),
-          _buildWakeMethodsCard(),
-          const SizedBox(height: 16),
-          _buildExtraOptionsCard(),
-          const SizedBox(height: 16),
-          _buildVersionAndUpdateCard(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(IconData icon, String title, {String? subtitle}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 20, color: Colors.tealAccent),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (subtitle != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            style: const TextStyle(fontSize: 13, color: Colors.white60),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildStatusBadge({required bool active, required String text}) {
+    final color = active ? Colors.greenAccent : Colors.orangeAccent;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            active ? Icons.check_circle_rounded : Icons.warning_amber_rounded,
+            size: 14,
+            color: color,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
         ],
       ),
     );
@@ -523,10 +617,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget _buildUpdateBannerCard() {
     final u = _availableUpdate!;
     return Card(
-      color: const Color(0xFF142926),
+      color: const Color(0xFF112624),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: Colors.tealAccent, width: 1),
+        borderRadius: BorderRadius.circular(18),
+        side: const BorderSide(color: Colors.tealAccent, width: 1.2),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -535,7 +629,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           children: [
             Row(
               children: [
-                const Icon(Icons.system_update, color: Colors.tealAccent),
+                const Icon(Icons.system_update_rounded, color: Colors.tealAccent),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -563,17 +657,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 style: const TextStyle(fontSize: 13, color: Colors.white70),
               ),
             ],
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             if (_isDownloading) ...[
-              LinearProgressIndicator(
-                value: _totalBytes > 0 ? _downloadProgress : null,
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: LinearProgressIndicator(
+                  minHeight: 8,
+                  value: _totalBytes > 0 ? _downloadProgress : null,
+                ),
               ),
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Скачано: ${_formatMb(_downloadedBytes)} / ${_formatMb(_totalBytes)} МБ (${(_downloadProgress * 100).toStringAsFixed(0)}%)',
+                    '${_formatMb(_downloadedBytes)} / ${_formatMb(_totalBytes)} МБ (${(_downloadProgress * 100).toStringAsFixed(0)}%)',
                     style: const TextStyle(fontSize: 12),
                   ),
                   TextButton(
@@ -585,86 +683,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ] else
               SizedBox(
                 width: double.infinity,
+                height: 48,
                 child: FilledButton.icon(
                   onPressed: _downloadAndInstallUpdate,
                   icon: Icon(
-                    _readyApkPath != null ? Icons.install_mobile : Icons.download,
+                    _readyApkPath != null
+                        ? Icons.install_mobile_rounded
+                        : Icons.download_rounded,
                   ),
                   label: Text(
                     _readyApkPath != null
                         ? 'Установить обновление v${u.version}'
-                        : 'Скачать и установить (без браузера)',
+                        : 'Скачать и установить обновление',
                   ),
                 ),
               ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPermissionsCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '1. Разрешения и защита от выгрузки',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                _isAccessibilityEnabled ? Icons.check_circle : Icons.error,
-                color: _isAccessibilityEnabled ? Colors.greenAccent : Colors.orangeAccent,
-              ),
-              title: const Text('Специальные возможности (Accessibility)'),
-              subtitle: Text(
-                _isAccessibilityEnabled
-                    ? 'Активно — сервис готов к работе'
-                    : 'Требуется для наложения черного экрана поверх системных панелей',
-              ),
-              trailing: FilledButton.tonal(
-                onPressed: () =>
-                    _channel.invokeMethod('openAccessibilitySettings'),
-                child: Text(_isAccessibilityEnabled ? 'Настройки' : 'Включить'),
-              ),
-            ),
-            const Divider(),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                _isBatteryIgnored ? Icons.shield : Icons.battery_alert,
-                color: _isBatteryIgnored ? Colors.greenAccent : Colors.amberAccent,
-              ),
-              title: const Text('Защита от закрытия системой (Anti-Kill)'),
-              subtitle: Text(
-                _isBatteryIgnored
-                    ? 'Ограничения батареи сняты (Accessibility не слетит)'
-                    : 'Рекомендуется отключить экономию энергии для стабильной работы',
-              ),
-              trailing: _isBatteryIgnored
-                  ? const Text('ОК', style: TextStyle(color: Colors.greenAccent))
-                  : FilledButton.tonal(
-                      onPressed: () => _channel
-                          .invokeMethod('requestIgnoreBatteryOptimizations'),
-                      child: const Text('Разрешить'),
-                    ),
-            ),
-            const Divider(),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.dashboard_customize, color: Colors.tealAccent),
-              title: const Text('Быстрая кнопка в шторке Android'),
-              subtitle: const Text('Позволяет гасить экран поверх любого приложения'),
-              trailing: OutlinedButton(
-                onPressed: _requestAddTile,
-                child: const Text('Добавить'),
-              ),
-            ),
           ],
         ),
       ),
@@ -678,35 +711,280 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              '2. Управление и проверка',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            _buildSectionHeader(
+              Icons.bolt_rounded,
+              'Быстрый запуск',
+              subtitle: _isAccessibilityEnabled
+                  ? 'Сервис готов. Можно гасить экран сейчас или через плитку в шторке.'
+                  : 'Для запуска сначала включите доступ в блоке «1. Разрешения» ниже.',
             ),
+            const SizedBox(height: 14),
+            SizedBox(
+              height: 52,
+              child: FilledButton.icon(
+                onPressed: () => _triggerBlackScreen(isTest: false),
+                icon: const Icon(Icons.power_settings_new_rounded),
+                label: const Text(
+                  'Выключить экран сейчас',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 48,
+              child: FilledButton.tonalIcon(
+                onPressed: () => _triggerBlackScreen(isTest: true),
+                icon: const Icon(Icons.timer_outlined),
+                label: const Text(
+                  'Безопасный ТЕСТ (автовозврат через 10 сек)',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPermissionsCard() {
+    final bool isAndroid13Plus = _sdkInt >= 33;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildSectionHeader(
+              Icons.verified_user_outlined,
+              '1. Разрешения и быстрая кнопка',
+            ),
+            const SizedBox(height: 14),
+
+            // Блок 1.1: Специальные возможности (Accessibility)
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF10131A),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: _isAccessibilityEnabled
+                      ? Colors.greenAccent.withValues(alpha: 0.25)
+                      : Colors.orangeAccent.withValues(alpha: 0.4),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Специальные возможности',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      _buildStatusBadge(
+                        active: _isAccessibilityEnabled,
+                        text: _isAccessibilityEnabled ? 'Активно' : 'Требуется',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _isAccessibilityEnabled
+                        ? 'Служба ScreenSaver активна и может перекрывать системные панели.'
+                        : 'Необходимо для наложения черного экрана поверх всех окон и шторки.',
+                    style: const TextStyle(fontSize: 13, color: Colors.white70),
+                  ),
+
+                  // Специальная подсказка для Android 13+ при установке из APK
+                  if (!_isAccessibilityEnabled && isAndroid13Plus) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.amberAccent.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Colors.amberAccent.withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.lock_open_rounded,
+                                size: 17,
+                                color: Colors.amberAccent,
+                              ),
+                              SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'Если Android пишет «Доступ запрещен»:',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.amberAccent,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 6),
+                          Text(
+                            'На Android 13+ для приложений, установленных из APK, нужно один раз снять защиту:\n'
+                            '1. Нажмите кнопку «Шаг 1: О приложении» ниже.\n'
+                            '2. Нажмите ⋮ (три точки в углу) или прокрутите в самый низ (на Xiaomi/HyperOS) и выберите «Разрешить ограниченные настройки».\n'
+                            '3. Затем нажмите «Шаг 2» и включите службу.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              height: 1.4,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 44,
+                      child: OutlinedButton.icon(
+                        onPressed: () =>
+                            _channel.invokeMethod('openAppDetailsSettings'),
+                        icon: const Icon(Icons.settings_applications_outlined, size: 19),
+                        label: const Text('Шаг 1: Открыть «О приложении»'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      height: 44,
+                      child: FilledButton.icon(
+                        onPressed: () =>
+                            _channel.invokeMethod('openAccessibilitySettings'),
+                        icon: const Icon(Icons.accessibility_new_rounded, size: 19),
+                        label: const Text('Шаг 2: Включить в «Спец. возможностях»'),
+                      ),
+                    ),
+                  ] else ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 42,
+                      child: _isAccessibilityEnabled
+                          ? OutlinedButton.icon(
+                              onPressed: () => _channel
+                                  .invokeMethod('openAccessibilitySettings'),
+                              icon: const Icon(Icons.tune_rounded, size: 18),
+                              label: const Text('Открыть настройки службы'),
+                            )
+                          : FilledButton.icon(
+                              onPressed: () => _channel
+                                  .invokeMethod('openAccessibilitySettings'),
+                              icon: const Icon(
+                                Icons.accessibility_new_rounded,
+                                size: 18,
+                              ),
+                              label: const Text('Включить доступ'),
+                            ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: () => _triggerBlackScreen(isTest: true),
-                    icon: const Icon(Icons.timer_outlined),
-                    label: const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text('ТЕСТ (10 сек)'),
+
+            // Блок 1.2: Защита от закрытия системой (Anti-Kill)
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF10131A),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF222836)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Защита от выгрузки (Anti-Kill)',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      _buildStatusBadge(
+                        active: _isBatteryIgnored,
+                        text: _isBatteryIgnored ? 'Защищено' : 'Рекомендуется',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _isBatteryIgnored
+                        ? 'Ограничения батареи сняты — система не отключит службу в фоне.'
+                        : 'Отключите экономию заряда для ScreenSaver, чтобы доступ не слетал.',
+                    style: const TextStyle(fontSize: 13, color: Colors.white70),
+                  ),
+                  if (!_isBatteryIgnored) ...[
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      height: 42,
+                      child: FilledButton.tonalIcon(
+                        onPressed: () => _channel
+                            .invokeMethod('requestIgnoreBatteryOptimizations'),
+                        icon: const Icon(Icons.shield_outlined, size: 18),
+                        label: const Text('Отключить оптимизацию батареи'),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // Блок 1.3: Плитка в шторке быстрых настроек
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF10131A),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF222836)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Плитка «Экран ВЫКЛ» в шторке Android',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Позволяет гасить экран в один тап поверх любой запущенной игры или видео.',
+                    style: TextStyle(fontSize: 13, color: Colors.white70),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 42,
+                    child: OutlinedButton.icon(
+                      onPressed: _requestAddTile,
+                      icon: const Icon(Icons.add_to_home_screen_rounded, size: 18),
+                      label: const Text('Добавить кнопку в шторку'),
                     ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _triggerBlackScreen(isTest: false),
-                    icon: const Icon(Icons.power_settings_new),
-                    label: const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text('Выключить сейчас'),
-                    ),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),
@@ -721,102 +999,153 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              '3. Способы включения экрана',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            _buildSectionHeader(
+              Icons.touch_app_outlined,
+              '2. Способы включения экрана',
+              subtitle: 'Можно включить сразу несколько удобных вариантов:',
             ),
-            const SizedBox(height: 4),
-            const Text(
-              'Можно выбрать сразу несколько способов одновременно:',
-              style: TextStyle(fontSize: 13, color: Colors.white70),
-            ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.power_settings_new_rounded, color: Colors.tealAccent),
               value: _wakeOnPowerInstant,
               onChanged: (v) {
                 setState(() => _wakeOnPowerInstant = v);
                 _saveSettings();
               },
-              title: const Text('Кнопка питания: 1 нажатие (Мгновенное пробуждение)'),
+              title: const Text(
+                'Кнопка питания (1 нажатие)',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
               subtitle: Text(
                 _wakeOnPowerInstant
-                    ? '1 нажатие: экран моргает и сразу загорается уже без шторки'
-                    : 'Стандартно: 1 нажатие гасит экран, 2-е нажатие включает экран',
+                    ? 'Экран сразу загорается после 1 нажатия кнопки питания'
+                    : 'Стандартно: 1-е нажатие блокирует, 2-е включает экран',
+                style: const TextStyle(fontSize: 12),
               ),
             ),
+            const Divider(height: 16),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.pan_tool_alt_outlined, color: Colors.tealAccent),
               value: _wakeOnMultiTouch,
               onChanged: (v) {
                 setState(() => _wakeOnMultiTouch = v);
                 _saveSettings();
               },
-              title: Text('Одновременное касание ($_multiTouchFingers пальца/ев)'),
-              subtitle: const Text('Быстрое пробуждение мультитачем'),
+              title: Text(
+                'Касание несколькими пальцами ($_multiTouchFingers)',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                'Одновременное нажатие на экран заданным числом пальцев',
+                style: TextStyle(fontSize: 12),
+              ),
             ),
-            if (_wakeOnMultiTouch)
-              Padding(
-                padding: const EdgeInsets.only(left: 8, right: 8, bottom: 8),
-                child: Row(
-                  children: [
-                    const Text('Пальцев: 2'),
-                    Expanded(
-                      child: Slider(
-                        value: _multiTouchFingers.toDouble(),
-                        min: 2,
-                        max: 5,
-                        divisions: 3,
-                        label: '$_multiTouchFingers',
-                        onChanged: (v) {
-                          setState(() => _multiTouchFingers = v.round());
+            if (_wakeOnMultiTouch) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [2, 3, 4, 5].map((count) {
+                  final bool selected = _multiTouchFingers == count;
+                  return Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: ChoiceChip(
+                        showCheckmark: false,
+                        selected: selected,
+                        label: Center(
+                          child: Text(
+                            '$count пальца',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: selected
+                                  ? FontWeight.w700
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                        onSelected: (_) {
+                          setState(() => _multiTouchFingers = count);
                           _saveSettings();
                         },
                       ),
                     ),
-                    const Text('5'),
-                  ],
-                ),
+                  );
+                }).toList(),
               ),
+              const SizedBox(height: 4),
+            ],
+            const Divider(height: 16),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.ads_click_rounded, color: Colors.tealAccent),
               value: _wakeOnDoubleTap,
               onChanged: (v) {
                 setState(() => _wakeOnDoubleTap = v);
                 _saveSettings();
               },
-              title: const Text('Двойное касание (Double Tap)'),
-              subtitle: const Text('Два быстрых нажатия одним пальцем'),
+              title: const Text(
+                'Двойной тап (Double Tap)',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                'Два быстрых касания одним пальцем',
+                style: TextStyle(fontSize: 12),
+              ),
             ),
+            const Divider(height: 16),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.touch_app_rounded, color: Colors.tealAccent),
               value: _wakeOnTripleTap,
               onChanged: (v) {
                 setState(() => _wakeOnTripleTap = v);
                 _saveSettings();
               },
-              title: const Text('Тройное касание (Triple Tap)'),
-              subtitle: const Text('Три быстрых нажатия (меньше ложных срабатываний)'),
+              title: const Text(
+                'Тройной тап (Triple Tap)',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                'Три быстрых касания (защита от случайных нажатий)',
+                style: TextStyle(fontSize: 12),
+              ),
             ),
+            const Divider(height: 16),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.swipe_rounded, color: Colors.tealAccent),
               value: _wakeOnSwipe,
               onChanged: (v) {
                 setState(() => _wakeOnSwipe = v);
                 _saveSettings();
               },
-              title: const Text('Длинный свайп по экрану'),
-              subtitle: const Text('Проведите пальцем в любом направлении'),
+              title: const Text(
+                'Длинный свайп по экрану',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                'Проведите пальцем по экрану в любую сторону',
+                style: TextStyle(fontSize: 12),
+              ),
             ),
+            const Divider(height: 16),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.volume_up_rounded, color: Colors.tealAccent),
               value: _wakeOnVolume,
               onChanged: (v) {
                 setState(() => _wakeOnVolume = v);
                 _saveSettings();
               },
-              title: const Text('Физические кнопки громкости (Volume +/-)'),
-              subtitle: const Text('Пробуждение по нажатию качельки громкости'),
+              title: const Text(
+                'Кнопки громкости (Volume +/-)',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                'Пробуждение нажатием физической качельки громкости',
+                style: TextStyle(fontSize: 12),
+              ),
             ),
           ],
         ),
@@ -831,30 +1160,45 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              '4. Дополнительные опции',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            _buildSectionHeader(
+              Icons.tune_rounded,
+              '3. Дополнительные опции',
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.phone_in_talk_rounded, color: Colors.tealAccent),
               value: _wakeOnCall,
               onChanged: (v) {
                 setState(() => _wakeOnCall = v);
                 _saveSettings();
               },
-              title: const Text('Пробуждать при входящем звонке'),
-              subtitle: const Text('Автоматически снимать черный экран при вызове'),
+              title: const Text(
+                'Пробуждать при входящем звонке',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                'Автоматически снимать черный экран при вызове',
+                style: TextStyle(fontSize: 12),
+              ),
             ),
+            const Divider(height: 16),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.lens_blur_rounded, color: Colors.tealAccent),
               value: _showIndicator,
               onChanged: (v) {
                 setState(() => _showIndicator = v);
                 _saveSettings();
               },
-              title: const Text('Индикатор программного отключения'),
-              subtitle: const Text('Тусклая плашка, меняющая позицию раз в 20 сек (защита OLED)'),
+              title: const Text(
+                'Индикатор программного отключения',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                'Тусклая плашка, меняющая позицию раз в 20 сек (защита OLED)',
+                style: TextStyle(fontSize: 12),
+              ),
             ),
           ],
         ),
@@ -867,38 +1211,46 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              '5. Версия и обновления (GitHub OTA)',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            _buildSectionHeader(
+              Icons.cloud_sync_outlined,
+              '4. О программе и обновления (OTA)',
             ),
-            const SizedBox(height: 8),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.info_outline, color: Colors.tealAccent),
-              title: Text('Текущая версия: v$_appVersion (сборка $_appBuildNumber)'),
-              subtitle: const Text('Репозиторий: $kGithubOwner/$kGithubRepo'),
-              trailing: _isCheckingUpdate
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : OutlinedButton.icon(
-                      onPressed: () => _checkForUpdates(silent: false),
-                      icon: const Icon(Icons.cloud_sync_outlined, size: 18),
-                      label: const Text('Проверить'),
-                    ),
+            const SizedBox(height: 10),
+            Text(
+              'Установлена версия: v$_appVersion (сборка $_appBuildNumber)\n'
+              'Источник обновлений: github.com/$kGithubOwner/$kGithubRepo',
+              style: const TextStyle(fontSize: 13, color: Colors.white70, height: 1.4),
             ),
-            if (_updateError != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  _updateError!,
-                  style: const TextStyle(fontSize: 12, color: Colors.orangeAccent),
+            if (_updateError != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _updateError!,
+                style: const TextStyle(fontSize: 12, color: Colors.orangeAccent),
+              ),
+            ],
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 44,
+              child: OutlinedButton.icon(
+                onPressed: _isCheckingUpdate
+                    ? null
+                    : () => _checkForUpdates(silent: false),
+                icon: _isCheckingUpdate
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.system_update_alt_rounded, size: 18),
+                label: Text(
+                  _isCheckingUpdate
+                      ? 'Проверка обновлений...'
+                      : 'Проверить наличие обновлений',
                 ),
               ),
+            ),
           ],
         ),
       ),
