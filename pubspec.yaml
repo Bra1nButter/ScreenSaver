@@ -1,7 +1,7 @@
 name: screen_saver
 description: "Утилита для программного отключения экрана Android 8.0+ без остановки активных приложений."
 publish_to: 'none'
-version: 1.0.0+2
+version: 1.0.1+3
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
