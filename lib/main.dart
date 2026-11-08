@@ -1,9 +1,34 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+const String kGithubOwner = 'Bra1nButter';
+const String kGithubRepo = 'ScreenSaver';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const ScreenSaverApp());
+}
+
+class ReleaseInfo {
+  final String version;
+  final String tagName;
+  final String releaseNotes;
+  final String downloadUrl;
+  final String fileName;
+  final int fileSize;
+
+  const ReleaseInfo({
+    required this.version,
+    required this.tagName,
+    required this.releaseNotes,
+    required this.downloadUrl,
+    required this.fileName,
+    required this.fileSize,
+  });
 }
 
 class ScreenSaverApp extends StatelessWidget {
@@ -38,6 +63,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   bool _isAccessibilityEnabled = false;
   bool _isBatteryIgnored = false;
+  String _appVersion = '1.0.0';
+  int _appBuildNumber = 1;
+  String _updatesDir = '';
 
   bool _wakeOnPowerInstant = true;
   bool _wakeOnDoubleTap = true;
@@ -49,15 +77,36 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _wakeOnCall = true;
   bool _showIndicator = true;
 
+  // Состояние системы автообновления
+  bool _isCheckingUpdate = false;
+  bool _isDownloading = false;
+  double _downloadProgress = 0.0;
+  int _downloadedBytes = 0;
+  int _totalBytes = 0;
+  String? _readyApkPath;
+  String? _updateError;
+  ReleaseInfo? _availableUpdate;
+  HttpClient? _activeHttpClient;
+  bool _initialCheckDone = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _refreshState();
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    await _refreshState();
+    if (!_initialCheckDone) {
+      _initialCheckDone = true;
+      await _checkForUpdates(silent: true);
+    }
   }
 
   @override
   void dispose() {
+    _activeHttpClient?.close(force: true);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -82,6 +131,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         _isAccessibilityEnabled =
             (data['isAccessibilityEnabled'] as bool?) ?? false;
         _isBatteryIgnored = (data['isBatteryIgnored'] as bool?) ?? false;
+        _appVersion = (data['versionName'] as String?) ?? '1.0.0';
+        _appBuildNumber = ((data['versionCode'] as num?) ?? 1).toInt();
+        _updatesDir = (data['updatesDir'] as String?) ?? '';
 
         _wakeOnPowerInstant = (s['wakeOnPowerInstant'] as bool?) ?? true;
         _wakeOnDoubleTap = (s['wakeOnDoubleTap'] as bool?) ?? true;
@@ -112,6 +164,277 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
   }
 
+  Future<void> _checkForUpdates({required bool silent}) async {
+    if (_isCheckingUpdate || _isDownloading) return;
+
+    setState(() {
+      _isCheckingUpdate = true;
+      _updateError = null;
+    });
+
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 12);
+    try {
+      final uri = Uri.parse(
+        'https://api.github.com/repos/$kGithubOwner/$kGithubRepo/releases/latest',
+      );
+      final req = await client.getUrl(uri);
+      req.headers.set(HttpHeaders.acceptHeader, 'application/vnd.github+json');
+      req.headers.set(HttpHeaders.userAgentHeader, 'ScreenSaver-Android-Updater');
+
+      final resp = await req.close();
+      final body = await resp.transform(utf8.decoder).join();
+
+      if (!mounted) return;
+
+      if (resp.statusCode == 404) {
+        setState(() => _isCheckingUpdate = false);
+        if (!silent) {
+          _showSnack('Релизов в репозитории пока нет (текущая v$_appVersion).');
+        }
+        return;
+      }
+
+      if (resp.statusCode == 403) {
+        setState(() {
+          _isCheckingUpdate = false;
+          _updateError = 'Превышен лимит запросов GitHub API. Попробуйте позже.';
+        });
+        if (!silent) _showSnack(_updateError!);
+        return;
+      }
+
+      if (resp.statusCode != 200) {
+        throw HttpException('HTTP ${resp.statusCode}');
+      }
+
+      final Map<String, dynamic> json =
+          jsonDecode(body) as Map<String, dynamic>;
+      final String tagName = (json['tag_name'] as String?) ?? '';
+      final String cleanVer = tagName.replaceFirst(RegExp(r'^[vV]'), '').trim();
+      final String notes = (json['body'] as String?)?.trim() ?? '';
+      final List<dynamic> assets = (json['assets'] as List<dynamic>?) ?? [];
+
+      Map<String, dynamic>? selectedAsset;
+      for (final item in assets) {
+        if (item is Map<String, dynamic>) {
+          final name = (item['name'] as String?)?.toLowerCase() ?? '';
+          if (name.endsWith('.apk')) {
+            selectedAsset = item;
+            if (name.contains('arm64')) break;
+          }
+        }
+      }
+
+      if (selectedAsset == null) {
+        setState(() => _isCheckingUpdate = false);
+        if (!silent) {
+          _showSnack('Релиз $tagName найден, но APK еще собирается в GitHub Actions.');
+        }
+        return;
+      }
+
+      if (_isNewerVersion(cleanVer, _appVersion)) {
+        final fileName = (selectedAsset['name'] as String?) ?? 'update.apk';
+        final fileSize = ((selectedAsset['size'] as num?) ?? 0).toInt();
+        final downloadUrl =
+            (selectedAsset['browser_download_url'] as String?) ?? '';
+
+        String? existingPath;
+        if (_updatesDir.isNotEmpty) {
+          final cachedFile = File('$_updatesDir/$fileName');
+          if (cachedFile.existsSync() &&
+              (fileSize == 0 || cachedFile.lengthSync() == fileSize)) {
+            existingPath = cachedFile.path;
+          }
+        }
+
+        setState(() {
+          _availableUpdate = ReleaseInfo(
+            version: cleanVer,
+            tagName: tagName,
+            releaseNotes: notes,
+            downloadUrl: downloadUrl,
+            fileName: fileName,
+            fileSize: fileSize,
+          );
+          _readyApkPath = existingPath;
+          _isCheckingUpdate = false;
+        });
+
+        if (!silent) {
+          _showSnack('Найдена новая версия: v$cleanVer!');
+        }
+      } else {
+        await _channel.invokeMethod('cleanupOldApks', {'keepFileName': null});
+        setState(() {
+          _availableUpdate = null;
+          _readyApkPath = null;
+          _isCheckingUpdate = false;
+        });
+        if (!silent) {
+          _showSnack('У вас установлена последняя версия (v$_appVersion).');
+        }
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isCheckingUpdate = false;
+        _updateError = 'Не удалось проверить обновления: $e';
+      });
+      if (!silent) {
+        _showSnack('Ошибка сети при проверке обновлений.');
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  bool _isNewerVersion(String remote, String local) {
+    List<int> parseParts(String v) {
+      final clean = v.split('+').first.split('-').first;
+      return clean
+          .split('.')
+          .map((e) => int.tryParse(e.trim()) ?? 0)
+          .toList();
+    }
+
+    final r = parseParts(remote);
+    final l = parseParts(local);
+    final maxLen = r.length > l.length ? r.length : l.length;
+
+    for (int i = 0; i < maxLen; i++) {
+      final rv = i < r.length ? r[i] : 0;
+      final lv = i < l.length ? l[i] : 0;
+      if (rv > lv) return true;
+      if (rv < lv) return false;
+    }
+    return false;
+  }
+
+  Future<void> _downloadAndInstallUpdate() async {
+    final update = _availableUpdate;
+    if (update == null || _isDownloading) return;
+
+    if (_readyApkPath != null && File(_readyApkPath!).existsSync()) {
+      await _triggerInstallApk(_readyApkPath!);
+      return;
+    }
+
+    if (_updatesDir.isEmpty) {
+      await _refreshState();
+    }
+
+    final targetFile = File('$_updatesDir/${update.fileName}');
+    final partFile = File('$_updatesDir/${update.fileName}.part');
+
+    setState(() {
+      _isDownloading = true;
+      _downloadProgress = 0.0;
+      _downloadedBytes = 0;
+      _totalBytes = update.fileSize;
+      _updateError = null;
+    });
+
+    final client = HttpClient();
+    _activeHttpClient = client;
+
+    try {
+      if (partFile.existsSync()) {
+        partFile.deleteSync();
+      }
+
+      final req = await client.getUrl(Uri.parse(update.downloadUrl));
+      req.headers.set(HttpHeaders.userAgentHeader, 'ScreenSaver-Android-Updater');
+      final resp = await req.close();
+
+      if (resp.statusCode != 200) {
+        throw HttpException('Сервер вернул код ${resp.statusCode}');
+      }
+
+      final contentLen = resp.contentLength > 0 ? resp.contentLength : update.fileSize;
+      final sink = partFile.openWrite();
+      int received = 0;
+
+      await for (final chunk in resp) {
+        sink.add(chunk);
+        received += chunk.length;
+        if (mounted) {
+          setState(() {
+            _downloadedBytes = received;
+            _totalBytes = contentLen;
+            if (contentLen > 0) {
+              _downloadProgress = (received / contentLen).clamp(0.0, 1.0);
+            }
+          });
+        }
+      }
+
+      await sink.flush();
+      await sink.close();
+
+      if (received < 100 * 1024) {
+        throw const FileSystemException('Скачанный файл поврежден или слишком мал');
+      }
+
+      if (targetFile.existsSync()) {
+        targetFile.deleteSync();
+      }
+      partFile.renameSync(targetFile.path);
+
+      await _channel.invokeMethod('cleanupOldApks', {
+        'keepFileName': update.fileName,
+      });
+
+      if (!mounted) return;
+      setState(() {
+        _isDownloading = false;
+        _readyApkPath = targetFile.path;
+      });
+
+      await _triggerInstallApk(targetFile.path);
+    } catch (e) {
+      try {
+        if (partFile.existsSync()) partFile.deleteSync();
+      } catch (_) {}
+
+      if (!mounted) return;
+      setState(() {
+        _isDownloading = false;
+        _updateError = 'Сбой загрузки: $e';
+      });
+      _showSnack('Не удалось скачать обновление. Попробуйте еще раз.');
+    } finally {
+      _activeHttpClient = null;
+      client.close();
+    }
+  }
+
+  void _cancelDownload() {
+    _activeHttpClient?.close(force: true);
+    _activeHttpClient = null;
+    setState(() {
+      _isDownloading = false;
+      _downloadProgress = 0.0;
+    });
+    _showSnack('Загрузка отменена');
+  }
+
+  Future<void> _triggerInstallApk(String path) async {
+    try {
+      final String? status = await _channel.invokeMethod<String>('installApk', {
+        'apkPath': path,
+      });
+      if (!mounted) return;
+      if (status == 'permission_requested') {
+        _showSnack(
+          'Разрешите установку для ScreenSaver — окно обновления откроется автоматически!',
+        );
+      }
+    } catch (e) {
+      _showSnack('Ошибка запуска установщика: $e');
+    }
+  }
+
   Future<void> _triggerBlackScreen({required bool isTest}) async {
     if (!_isAccessibilityEnabled) {
       _showSnack(
@@ -137,6 +460,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
+  String _formatMb(int bytes) {
+    return (bytes / (1024 * 1024)).toStringAsFixed(1);
+  }
+
   void _showSnack(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating),
@@ -147,8 +474,23 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ScreenSaver'),
-        centerTitle: false,
+        title: Row(
+          children: [
+            const Text('ScreenSaver'),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.tealAccent.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                'v$_appVersion',
+                style: const TextStyle(fontSize: 12, color: Colors.tealAccent),
+              ),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             tooltip: 'Обновить статус',
@@ -160,6 +502,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (_availableUpdate != null) ...[
+            _buildUpdateBannerCard(),
+            const SizedBox(height: 16),
+          ],
           _buildPermissionsCard(),
           const SizedBox(height: 16),
           _buildActionsCard(),
@@ -167,7 +513,92 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           _buildWakeMethodsCard(),
           const SizedBox(height: 16),
           _buildExtraOptionsCard(),
+          const SizedBox(height: 16),
+          _buildVersionAndUpdateCard(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildUpdateBannerCard() {
+    final u = _availableUpdate!;
+    return Card(
+      color: const Color(0xFF142926),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: Colors.tealAccent, width: 1),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.system_update, color: Colors.tealAccent),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Доступно обновление v${u.version}',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.tealAccent,
+                    ),
+                  ),
+                ),
+                if (u.fileSize > 0)
+                  Text(
+                    '${_formatMb(u.fileSize)} МБ',
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
+              ],
+            ),
+            if (u.releaseNotes.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                u.releaseNotes,
+                maxLines: 5,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 13, color: Colors.white70),
+              ),
+            ],
+            const SizedBox(height: 12),
+            if (_isDownloading) ...[
+              LinearProgressIndicator(
+                value: _totalBytes > 0 ? _downloadProgress : null,
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Скачано: ${_formatMb(_downloadedBytes)} / ${_formatMb(_totalBytes)} МБ (${(_downloadProgress * 100).toStringAsFixed(0)}%)',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  TextButton(
+                    onPressed: _cancelDownload,
+                    child: const Text('Отмена'),
+                  ),
+                ],
+              ),
+            ] else
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _downloadAndInstallUpdate,
+                  icon: Icon(
+                    _readyApkPath != null ? Icons.install_mobile : Icons.download,
+                  ),
+                  label: Text(
+                    _readyApkPath != null
+                        ? 'Установить обновление v${u.version}'
+                        : 'Скачать и установить (без браузера)',
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -425,6 +856,49 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               title: const Text('Индикатор программного отключения'),
               subtitle: const Text('Тусклая плашка, меняющая позицию раз в 20 сек (защита OLED)'),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVersionAndUpdateCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '5. Версия и обновления (GitHub OTA)',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.info_outline, color: Colors.tealAccent),
+              title: Text('Текущая версия: v$_appVersion (сборка $_appBuildNumber)'),
+              subtitle: const Text('Репозиторий: $kGithubOwner/$kGithubRepo'),
+              trailing: _isCheckingUpdate
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : OutlinedButton.icon(
+                      onPressed: () => _checkForUpdates(silent: false),
+                      icon: const Icon(Icons.cloud_sync_outlined, size: 18),
+                      label: const Text('Проверить'),
+                    ),
+            ),
+            if (_updateError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _updateError!,
+                  style: const TextStyle(fontSize: 12, color: Colors.orangeAccent),
+                ),
+              ),
           ],
         ),
       ),

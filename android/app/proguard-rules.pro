@@ -1,0 +1,3 @@
+-keep class io.flutter.** { *; }
+-keep class com.screensaver.screen_saver.** { *; }
+-dontwarn io.flutter.embedding.**

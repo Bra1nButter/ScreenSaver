@@ -4,6 +4,7 @@ import android.app.StatusBarManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
@@ -12,10 +13,12 @@ import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 class MainActivity : FlutterActivity() {
     private val channelName = "com.screensaver/native"
     private lateinit var settingsManager: SettingsManager
+    private var pendingInstallApkPath: String? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -25,9 +28,23 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "getState" -> {
+                        val pkgInfo = getPackageInfoCompat()
+                        val versionName = pkgInfo.versionName ?: "1.0.0"
+                        val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            pkgInfo.longVersionCode
+                        } else {
+                            @Suppress("DEPRECATION")
+                            pkgInfo.versionCode.toLong()
+                        }
+                        val updatesDir = File(cacheDir, "updates").apply { mkdirs() }
+
                         val map = HashMap<String, Any>()
                         map["isAccessibilityEnabled"] = isAccessibilityServiceEnabled()
                         map["isBatteryIgnored"] = isBatteryOptimizationIgnored()
+                        map["canInstallPackages"] = packageManager.canRequestPackageInstalls()
+                        map["versionName"] = versionName
+                        map["versionCode"] = versionCode
+                        map["updatesDir"] = updatesDir.absolutePath
                         map["settings"] = settingsManager.toMap()
                         result.success(map)
                     }
@@ -104,10 +121,82 @@ class MainActivity : FlutterActivity() {
                         }
                     }
 
+                    "installApk" -> {
+                        val apkPath = call.argument<String>("apkPath")
+                        if (apkPath.isNullOrEmpty()) {
+                            result.error("INVALID_PATH", "APK path is empty", null)
+                            return@setMethodCallHandler
+                        }
+                        val apkFile = File(apkPath)
+                        if (!apkFile.exists()) {
+                            result.error("NOT_FOUND", "APK file not found", null)
+                            return@setMethodCallHandler
+                        }
+
+                        if (!packageManager.canRequestPackageInstalls()) {
+                            pendingInstallApkPath = apkPath
+                            val intent = Intent(
+                                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                Uri.parse("package:$packageName")
+                            )
+                            startActivity(intent)
+                            result.success("permission_requested")
+                        } else {
+                            pendingInstallApkPath = null
+                            launchApkInstaller(apkFile)
+                            result.success("installer_launched")
+                        }
+                    }
+
+                    "cleanupOldApks" -> {
+                        val keepFileName = call.argument<String>("keepFileName")
+                        val updatesDir = File(cacheDir, "updates")
+                        if (updatesDir.exists()) {
+                            updatesDir.listFiles()?.forEach { f ->
+                                if (keepFileName == null || f.name != keepFileName) {
+                                    try {
+                                        f.delete()
+                                    } catch (_: Exception) {}
+                                }
+                            }
+                        }
+                        result.success(true)
+                    }
+
                     else -> result.notImplemented()
                 }
             }
     }
+
+    override fun onResume() {
+        super.onResume()
+        val pendingPath = pendingInstallApkPath
+        if (pendingPath != null && packageManager.canRequestPackageInstalls()) {
+            pendingInstallApkPath = null
+            val file = File(pendingPath)
+            if (file.exists()) {
+                launchApkInstaller(file)
+            }
+        }
+    }
+
+    private fun launchApkInstaller(apkFile: File) {
+        val contentUri = ApkFileProvider.getUriForFile(packageName, apkFile)
+        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(contentUri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(installIntent)
+    }
+
+    private fun getPackageInfoCompat() =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageInfo(packageName, 0)
+        }
 
     private fun isAccessibilityServiceEnabled(): Boolean {
         if (BlackScreenAccessibilityService.isRunning) return true

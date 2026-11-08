@@ -1,30 +1,18 @@
 # Техническая документация ScreenSaver
 
-## 1. Архитектура решения
+## 1. Механизм внутриприложенческого обновления (OTA)
 
-Проект разделен на два слоя, взаимодействующих через `MethodChannel('com.screensaver/native')`:
+1. При запуске приложение запрашивает `https://api.github.com/repos/Bra1nButter/ScreenSaver/releases/latest`.
+2. Если версия `tag_name` на GitHub выше текущей (`PackageManager.getPackageInfo`), отображается карточка обновления.
+3. Скачивание идет во временный файл `.part` внутри `cacheDir/updates` с проверкой целостности.
+4. Нативный `ApkFileProvider` формирует `content://` URI и запускает системный установщик `application/vnd.android.package-archive`.
+5. Если разрешение `REQUEST_INSTALL_PACKAGES` еще не выдано, открывается системное окно разрешения, а после возврата пользователя в приложение установка запускается автоматически в `MainActivity.onResume()`.
 
-1. **Flutter UI (`lib/main.dart`)**:
-   - Отвечает за проверку разрешений (`AccessibilityService`, `IgnoreBatteryOptimizations`).
-   - Автоматически обновляет статусы разрешений при возврате пользователя из системных настроек (`WidgetsBindingObserver`).
-   - Управляет сохранением настроек и запуском 10-секундного тестового режима.
+## 2. Настройка GitHub Secrets для единой подписи APK
 
-2. **Нативное ядро Android (`android/app/src/main/kotlin/...`)**:
-   - `SettingsManager.kt` — потокобезопасное хранилище пользовательских настроек в `SharedPreferences`.
-   - `BlackScreenAccessibilityService.kt` — системный сервис специальных возможностей.
-   - `BlackScreenTileService.kt` — сервис плитки быстрых настроек в шторке Android (`TileService`).
-   - `MainActivity.kt` — мост `MethodChannel` между Flutter и Android API.
+Чтобы сборки из GitHub Actions устанавливались поверх локальных сборок без конфликта подписей, добавьте в настройки репозитория (`Settings -> Secrets and variables -> Actions -> New repository secret`) 4 секрета:
 
-## 2. Почему активное приложение не останавливается?
-
-Когда создается окно через `WindowManager` с типом `TYPE_ACCESSIBILITY_OVERLAY`, используются следующие флаги:
-- `FLAG_NOT_FOCUSABLE` — гарантирует, что нижележащее `Activity` (например, игра или плеер) **не теряет оконный фокус** (`onWindowFocusChanged` остается `true`), но при этом все касания экрана перехватываются нашим полноэкранным слоем.
-- `FLAG_KEEP_SCREEN_ON` — запрещает Android уводить процессор и экран в физический сон по системному тайм-ауту.
-- `screenBrightness = 0.0f` — временно переводит контроллер подсветки дисплея на минимальный уровень только на время отображения черного окна.
-
-## 3. Защита от сброса AccessibilityService
-
-В `AndroidManifest.xml` для сервиса заданы параметры:
-- `android:stopWithTask="false"` — смахивание приложения из списка недавних (Recents) не останавливает сервис.
-- `android:directBootAware="true"` — сервис готов к работе сразу после перезагрузки устройства.
-- Дополнительно в UI выведена кнопка запроса `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`, добавляющая приложение в белый список системного контроллера питания.
+- `KEYSTORE_BASE64` — содержимое файла `keystore_base64.txt` (сгенерирован в корне проекта).
+- `STORE_PASSWORD` — `ScreenSaverStore2026`
+- `KEY_PASSWORD` — `ScreenSaverKey2026`
+- `KEY_ALIAS` — `screensaver`
