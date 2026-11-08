@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ScreenSaver</string>
+    <string name="tile_label">Экран ВЫКЛ</string>
+    <string name="accessibility_service_label">ScreenSaver (Черный экран)</string>
+    <string name="accessibility_service_description">Позволяет накладывать черный экран поверх всех системных панелей для экономии энергии без остановки текущих приложений и перехватывать нажатия кнопок громкости для пробуждения.</string>
+</resources>
