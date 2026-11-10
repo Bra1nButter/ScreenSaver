@@ -1,10 +1,15 @@
 package com.screensaver.screen_saver
 
 import android.accessibilityservice.AccessibilityService
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -32,6 +37,9 @@ import kotlin.random.Random
 class BlackScreenAccessibilityService : AccessibilityService() {
 
     companion object {
+        private const val CHANNEL_ID = "screensaver_keepalive_channel"
+        private const val NOTIFICATION_ID = 1001
+
         @Volatile
         var instance: BlackScreenAccessibilityService? = null
             private set
@@ -59,7 +67,6 @@ class BlackScreenAccessibilityService : AccessibilityService() {
     private var downY: Float = 0f
     private var maxPointersInGesture: Int = 0
 
-    // Ресивер кнопки питания (выключение физического экрана)
     private val screenOffReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == Intent.ACTION_SCREEN_OFF && isOverlayShowing) {
@@ -100,18 +107,106 @@ class BlackScreenAccessibilityService : AccessibilityService() {
         }
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        updateForegroundKeepAlive()
+        return START_STICKY
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         settings = SettingsManager(this)
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
-        val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(screenOffReceiver, filter, Context.RECEIVER_EXPORTED)
-        } else {
-            registerReceiver(screenOffReceiver, filter)
+        updateForegroundKeepAlive()
+
+        try {
+            val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(screenOffReceiver, filter, Context.RECEIVER_EXPORTED)
+            } else {
+                registerReceiver(screenOffReceiver, filter)
+            }
+        } catch (_: Exception) {}
+    }
+
+    fun updateForegroundKeepAlive() {
+        if (!::settings.isInitialized) {
+            settings = SettingsManager(this)
         }
+        if (settings.keepAliveForeground) {
+            startKeepAliveForeground()
+        } else {
+            stopKeepAliveForeground()
+        }
+    }
+
+    private fun startKeepAliveForeground() {
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    CHANNEL_ID,
+                    "Удержание службы в памяти",
+                    NotificationManager.IMPORTANCE_MIN
+                ).apply {
+                    description = "Защищает службу ScreenSaver от фонового закрытия системой"
+                    setShowBadge(false)
+                    lockscreenVisibility = Notification.VISIBILITY_SECRET
+                }
+                nm.createNotificationChannel(channel)
+            }
+
+            val openIntent = Intent(this, MainActivity::class.java)
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                openIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(this, CHANNEL_ID)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(this)
+            }
+
+            val notification = builder
+                .setContentTitle("ScreenSaver активен")
+                .setContentText("Готов к отключению экрана из шторки")
+                .setSmallIcon(android.R.drawable.ic_lock_power_off)
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .build()
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun stopKeepAliveForeground() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (_: Exception) {}
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // При смахивании приложения из списка недавних удерживаем сервис активным
+        updateForegroundKeepAlive()
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
@@ -226,7 +321,6 @@ class BlackScreenAccessibilityService : AccessibilityService() {
         }
     }
 
-    // Мгновенное пробуждение экрана при выключении (1 нажатие)
     private fun wakeUpScreenImmediately() {
         mainHandler.postDelayed({
             try {
@@ -417,8 +511,16 @@ class BlackScreenAccessibilityService : AccessibilityService() {
         )
     }
 
+    override fun onUnbind(intent: Intent?): Boolean {
+        hideOverlay()
+        stopKeepAliveForeground()
+        instance = null
+        return super.onUnbind(intent)
+    }
+
     override fun onDestroy() {
         hideOverlay()
+        stopKeepAliveForeground()
         try {
             unregisterReceiver(screenOffReceiver)
         } catch (_: Exception) {}

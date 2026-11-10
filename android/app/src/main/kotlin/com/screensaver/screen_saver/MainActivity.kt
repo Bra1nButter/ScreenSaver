@@ -28,6 +28,16 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "getState" -> {
+                        val isRunningInRam = BlackScreenAccessibilityService.isRunning
+                        val isListedInSettings = ServiceReviver.isListedInSecureSettings(this)
+                        val isZombie = isListedInSettings && !isRunningInRam
+                        val canSelfHeal = ServiceReviver.canSelfHeal(this)
+
+                        // Если обнаружен Зомби-режим и есть право самореанимации — лечим сразу при входе!
+                        if (isZombie && canSelfHeal) {
+                            ServiceReviver.reviveAccessibilityService(this)
+                        }
+
                         val pkgInfo = getPackageInfoCompat()
                         val versionName = pkgInfo.versionName ?: "1.0.0"
                         val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -39,7 +49,10 @@ class MainActivity : FlutterActivity() {
                         val updatesDir = File(cacheDir, "updates").apply { mkdirs() }
 
                         val map = HashMap<String, Any>()
-                        map["isAccessibilityEnabled"] = isAccessibilityServiceEnabled()
+                        // Теперь true возвращается ТОЛЬКО когда сервис реально жив в ОЗУ!
+                        map["isAccessibilityEnabled"] = isRunningInRam
+                        map["isZombieState"] = isZombie
+                        map["canSelfHeal"] = canSelfHeal
                         map["isBatteryIgnored"] = isBatteryOptimizationIgnored()
                         map["canInstallPackages"] = packageManager.canRequestPackageInstalls()
                         map["sdkInt"] = Build.VERSION.SDK_INT
@@ -54,7 +67,18 @@ class MainActivity : FlutterActivity() {
                         val args = call.arguments as? Map<*, *>
                         if (args != null) {
                             settingsManager.updateFromMap(args)
+                            BlackScreenAccessibilityService.instance?.updateForegroundKeepAlive()
                         }
+                        result.success(true)
+                    }
+
+                    "reviveService" -> {
+                        val ok = ServiceReviver.reviveAccessibilityService(this)
+                        result.success(ok)
+                    }
+
+                    "openAutostartSettings" -> {
+                        ServiceReviver.openOemAutostartSettings(this)
                         result.success(true)
                     }
 
@@ -95,6 +119,11 @@ class MainActivity : FlutterActivity() {
                         if (service != null) {
                             service.showOverlay(isTest = false)
                             result.success(true)
+                        } else if (ServiceReviver.reviveAccessibilityService(this) {
+                                BlackScreenAccessibilityService.instance?.showOverlay(isTest = false)
+                            }
+                        ) {
+                            result.success(true)
                         } else {
                             result.success(false)
                         }
@@ -104,6 +133,11 @@ class MainActivity : FlutterActivity() {
                         val service = BlackScreenAccessibilityService.instance
                         if (service != null) {
                             service.showOverlay(isTest = true, durationSec = 10)
+                            result.success(true)
+                        } else if (ServiceReviver.reviveAccessibilityService(this) {
+                                BlackScreenAccessibilityService.instance?.showOverlay(isTest = true, durationSec = 10)
+                            }
+                        ) {
                             result.success(true)
                         } else {
                             result.success(false)
@@ -209,16 +243,6 @@ class MainActivity : FlutterActivity() {
             @Suppress("DEPRECATION")
             packageManager.getPackageInfo(packageName, 0)
         }
-
-    private fun isAccessibilityServiceEnabled(): Boolean {
-        if (BlackScreenAccessibilityService.isRunning) return true
-        val expected = "$packageName/${BlackScreenAccessibilityService::class.java.canonicalName}"
-        val enabledServices = Settings.Secure.getString(
-            contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: return false
-        return enabledServices.contains(expected) || enabledServices.contains(packageName)
-    }
 
     private fun isBatteryOptimizationIgnored(): Boolean {
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager

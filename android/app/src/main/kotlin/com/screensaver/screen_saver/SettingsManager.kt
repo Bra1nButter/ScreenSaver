@@ -2,10 +2,28 @@ package com.screensaver.screen_saver
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Build
 
 class SettingsManager(context: Context) {
-    private val prefs: SharedPreferences =
-        context.getSharedPreferences("screen_saver_prefs", Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences = createSafePreferences(context)
+
+    private fun createSafePreferences(context: Context): SharedPreferences {
+        val appCtx = context.applicationContext ?: context
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val deviceCtx = appCtx.createDeviceProtectedStorageContext()
+            // Переносим старые настройки при первом обновлении, если телефон разблокирован
+            try {
+                deviceCtx.moveSharedPreferencesFrom(appCtx, "screen_saver_prefs")
+            } catch (_: Exception) {}
+            deviceCtx.getSharedPreferences("screen_saver_prefs", Context.MODE_PRIVATE)
+        } else {
+            appCtx.getSharedPreferences("screen_saver_prefs", Context.MODE_PRIVATE)
+        }
+    }
+
+    var keepAliveForeground: Boolean
+        get() = prefs.getBoolean("keepAliveForeground", true)
+        set(value) = prefs.edit().putBoolean("keepAliveForeground", value).apply()
 
     var wakeOnPowerInstant: Boolean
         get() = prefs.getBoolean("wakeOnPowerInstant", true)
@@ -45,6 +63,7 @@ class SettingsManager(context: Context) {
 
     fun toMap(): Map<String, Any> {
         return mapOf(
+            "keepAliveForeground" to keepAliveForeground,
             "wakeOnPowerInstant" to wakeOnPowerInstant,
             "wakeOnDoubleTap" to wakeOnDoubleTap,
             "wakeOnTripleTap" to wakeOnTripleTap,
@@ -58,6 +77,7 @@ class SettingsManager(context: Context) {
     }
 
     fun updateFromMap(map: Map<*, *>) {
+        (map["keepAliveForeground"] as? Boolean)?.let { keepAliveForeground = it }
         (map["wakeOnPowerInstant"] as? Boolean)?.let { wakeOnPowerInstant = it }
         (map["wakeOnDoubleTap"] as? Boolean)?.let { wakeOnDoubleTap = it }
         (map["wakeOnTripleTap"] as? Boolean)?.let { wakeOnTripleTap = it }

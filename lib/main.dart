@@ -71,12 +71,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   static const MethodChannel _channel = MethodChannel('com.screensaver/native');
 
   bool _isAccessibilityEnabled = false;
+  bool _isZombieState = false;
+  bool _canSelfHeal = false;
   bool _isBatteryIgnored = false;
   int _sdkInt = 33;
   String _appVersion = '1.0.0';
   int _appBuildNumber = 1;
   String _updatesDir = '';
 
+  bool _keepAliveForeground = true;
   bool _wakeOnPowerInstant = true;
   bool _wakeOnDoubleTap = true;
   bool _wakeOnTripleTap = false;
@@ -136,15 +139,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final Map<dynamic, dynamic> s =
           (data['settings'] as Map<dynamic, dynamic>?) ?? {};
 
+      final bool wasZombie = (data['isZombieState'] as bool?) ?? false;
+      final bool canHeal = (data['canSelfHeal'] as bool?) ?? false;
+
       setState(() {
         _isAccessibilityEnabled =
             (data['isAccessibilityEnabled'] as bool?) ?? false;
+        _isZombieState = wasZombie;
+        _canSelfHeal = canHeal;
         _isBatteryIgnored = (data['isBatteryIgnored'] as bool?) ?? false;
         _sdkInt = ((data['sdkInt'] as num?) ?? 33).toInt();
         _appVersion = (data['versionName'] as String?) ?? '1.0.0';
         _appBuildNumber = ((data['versionCode'] as num?) ?? 1).toInt();
         _updatesDir = (data['updatesDir'] as String?) ?? '';
 
+        _keepAliveForeground = (s['keepAliveForeground'] as bool?) ?? true;
         _wakeOnPowerInstant = (s['wakeOnPowerInstant'] as bool?) ?? true;
         _wakeOnDoubleTap = (s['wakeOnDoubleTap'] as bool?) ?? true;
         _wakeOnTripleTap = (s['wakeOnTripleTap'] as bool?) ?? false;
@@ -155,6 +164,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         _wakeOnCall = (s['wakeOnCall'] as bool?) ?? true;
         _showIndicator = (s['showIndicator'] as bool?) ?? true;
       });
+
+      // Если сработала автореанимация, перепроверяем статус через 500 мс
+      if (wasZombie && canHeal) {
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) _refreshState();
+        });
+      }
     } catch (e) {
       debugPrint('Error loading state: $e');
     }
@@ -162,6 +178,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _saveSettings() async {
     await _channel.invokeMethod('saveSettings', {
+      'keepAliveForeground': _keepAliveForeground,
       'wakeOnPowerInstant': _wakeOnPowerInstant,
       'wakeOnDoubleTap': _wakeOnDoubleTap,
       'wakeOnTripleTap': _wakeOnTripleTap,
@@ -454,18 +471,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _triggerBlackScreen({required bool isTest}) async {
-    if (!_isAccessibilityEnabled) {
-      _showSnack(
-        'Сначала включите доступ в разделе «1. Разрешения»!',
-      );
-      return;
-    }
     await _saveSettings();
     final String method = isTest ? 'startTestMode' : 'startBlackScreen';
     final bool? ok = await _channel.invokeMethod<bool>(method);
     if (ok != true && mounted) {
+      await _refreshState();
       _showSnack(
-        'Сервис еще не активен. Перезапустите переключатель в настройках.',
+        _isZombieState
+            ? 'Служба была остановлена системой! Выключите и снова включите тумблер в «Спец. возможностях».'
+            : 'Сначала включите доступ в разделе «1. Разрешения»!',
       );
     }
   }
@@ -498,7 +512,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         surfaceTintColor: Colors.transparent,
         title: Row(
           children: [
-            const Icon(Icons.dark_mode_outlined, color: Colors.tealAccent, size: 22),
+            const Icon(
+              Icons.dark_mode_outlined,
+              color: Colors.tealAccent,
+              size: 22,
+            ),
             const SizedBox(width: 8),
             const Text(
               'ScreenSaver',
@@ -629,7 +647,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           children: [
             Row(
               children: [
-                const Icon(Icons.system_update_rounded, color: Colors.tealAccent),
+                const Icon(
+                  Icons.system_update_rounded,
+                  color: Colors.tealAccent,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -715,8 +736,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               Icons.bolt_rounded,
               'Быстрый запуск',
               subtitle: _isAccessibilityEnabled
-                  ? 'Сервис готов. Можно гасить экран сейчас или через плитку в шторке.'
-                  : 'Для запуска сначала включите доступ в блоке «1. Разрешения» ниже.',
+                  ? 'Сервис активен в памяти. Можно гасить экран сейчас или через шторку.'
+                  : _isZombieState
+                      ? 'Внимание: система выгрузила службу в фоне! Перезапустите переключатель ниже.'
+                      : 'Для запуска сначала включите доступ в блоке «1. Разрешения» ниже.',
             ),
             const SizedBox(height: 14),
             SizedBox(
@@ -759,7 +782,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           children: [
             _buildSectionHeader(
               Icons.verified_user_outlined,
-              '1. Разрешения и быстрая кнопка',
+              '1. Разрешения и защита от выгрузки',
             ),
             const SizedBox(height: 14),
 
@@ -772,7 +795,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 border: Border.all(
                   color: _isAccessibilityEnabled
                       ? Colors.greenAccent.withValues(alpha: 0.25)
-                      : Colors.orangeAccent.withValues(alpha: 0.4),
+                      : Colors.orangeAccent.withValues(alpha: 0.45),
                 ),
               ),
               child: Column(
@@ -791,20 +814,39 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       ),
                       _buildStatusBadge(
                         active: _isAccessibilityEnabled,
-                        text: _isAccessibilityEnabled ? 'Активно' : 'Требуется',
+                        text: _isAccessibilityEnabled
+                            ? 'Работает в ОЗУ'
+                            : _isZombieState
+                                ? 'Сбой (Зомби)'
+                                : 'Требуется',
                       ),
                     ],
                   ),
                   const SizedBox(height: 6),
                   Text(
                     _isAccessibilityEnabled
-                        ? 'Служба ScreenSaver активна и может перекрывать системные панели.'
-                        : 'Необходимо для наложения черного экрана поверх всех окон и шторки.',
+                        ? (_canSelfHeal
+                            ? 'Служба активна + включена ADB-самореанимация (WRITE_SECURE_SETTINGS).'
+                            : 'Служба активна в памяти и готова перекрывать системные панели.')
+                        : _isZombieState
+                            ? 'Переключатель в настройках стоит на «ВКЛ», но Android принудительно остановил процесс! Выключите и снова включите переключатель ScreenSaver.'
+                            : 'Необходимо для наложения черного экрана поверх всех окон и шторки.',
                     style: const TextStyle(fontSize: 13, color: Colors.white70),
                   ),
 
-                  // Специальная подсказка для Android 13+ при установке из APK
-                  if (!_isAccessibilityEnabled && isAndroid13Plus) ...[
+                  // Плашка при обнаружении Зомби-режима
+                  if (_isZombieState) ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 44,
+                      child: FilledButton.icon(
+                        onPressed: () =>
+                            _channel.invokeMethod('openAccessibilitySettings'),
+                        icon: const Icon(Icons.restart_alt_rounded, size: 19),
+                        label: const Text('Перезапустить тумблер (Выкл -> Вкл)'),
+                      ),
+                    ),
+                  ] else if (!_isAccessibilityEnabled && isAndroid13Plus) ...[
                     const SizedBox(height: 12),
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -859,7 +901,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       child: OutlinedButton.icon(
                         onPressed: () =>
                             _channel.invokeMethod('openAppDetailsSettings'),
-                        icon: const Icon(Icons.settings_applications_outlined, size: 19),
+                        icon: const Icon(
+                          Icons.settings_applications_outlined,
+                          size: 19,
+                        ),
                         label: const Text('Шаг 1: Открыть «О приложении»'),
                       ),
                     ),
@@ -869,8 +914,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       child: FilledButton.icon(
                         onPressed: () =>
                             _channel.invokeMethod('openAccessibilitySettings'),
-                        icon: const Icon(Icons.accessibility_new_rounded, size: 19),
-                        label: const Text('Шаг 2: Включить в «Спец. возможностях»'),
+                        icon: const Icon(
+                          Icons.accessibility_new_rounded,
+                          size: 19,
+                        ),
+                        label: const Text(
+                          'Шаг 2: Включить в «Спец. возможностях»',
+                        ),
                       ),
                     ),
                   ] else ...[
@@ -901,7 +951,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
             const SizedBox(height: 12),
 
-            // Блок 1.2: Защита от закрытия системой (Anti-Kill)
+            // Блок 1.2: Защита от закрытия системой (Anti-Kill + Автозапуск HyperOS)
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -930,24 +980,32 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     ],
                   ),
                   const SizedBox(height: 6),
-                  Text(
-                    _isBatteryIgnored
-                        ? 'Ограничения батареи сняты — система не отключит службу в фоне.'
-                        : 'Отключите экономию заряда для ScreenSaver, чтобы доступ не слетал.',
-                    style: const TextStyle(fontSize: 13, color: Colors.white70),
+                  const Text(
+                    'На Xiaomi / HyperOS / Samsung включите «Автозапуск» и снимите ограничения батареи, чтобы система не останавливала службу спустя несколько дней.',
+                    style: TextStyle(fontSize: 13, color: Colors.white70),
                   ),
+                  const SizedBox(height: 10),
                   if (!_isBatteryIgnored) ...[
-                    const SizedBox(height: 10),
                     SizedBox(
                       height: 42,
                       child: FilledButton.tonalIcon(
                         onPressed: () => _channel
                             .invokeMethod('requestIgnoreBatteryOptimizations'),
-                        icon: const Icon(Icons.shield_outlined, size: 18),
-                        label: const Text('Отключить оптимизацию батареи'),
+                        icon: const Icon(Icons.battery_saver_rounded, size: 18),
+                        label: const Text('1. Отключить экономию батареи'),
                       ),
                     ),
+                    const SizedBox(height: 8),
                   ],
+                  SizedBox(
+                    height: 42,
+                    child: OutlinedButton.icon(
+                      onPressed: () =>
+                          _channel.invokeMethod('openAutostartSettings'),
+                      icon: const Icon(Icons.rocket_launch_outlined, size: 18),
+                      label: const Text('Настроить Автозапуск (Xiaomi / HyperOS)'),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -979,7 +1037,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     height: 42,
                     child: OutlinedButton.icon(
                       onPressed: _requestAddTile,
-                      icon: const Icon(Icons.add_to_home_screen_rounded, size: 18),
+                      icon: const Icon(
+                        Icons.add_to_home_screen_rounded,
+                        size: 18,
+                      ),
                       label: const Text('Добавить кнопку в шторку'),
                     ),
                   ),
@@ -1007,7 +1068,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             const SizedBox(height: 10),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              secondary: const Icon(Icons.power_settings_new_rounded, color: Colors.tealAccent),
+              secondary: const Icon(
+                Icons.power_settings_new_rounded,
+                color: Colors.tealAccent,
+              ),
               value: _wakeOnPowerInstant,
               onChanged: (v) {
                 setState(() => _wakeOnPowerInstant = v);
@@ -1027,7 +1091,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             const Divider(height: 16),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              secondary: const Icon(Icons.pan_tool_alt_outlined, color: Colors.tealAccent),
+              secondary: const Icon(
+                Icons.pan_tool_alt_outlined,
+                color: Colors.tealAccent,
+              ),
               value: _wakeOnMultiTouch,
               onChanged: (v) {
                 setState(() => _wakeOnMultiTouch = v);
@@ -1035,7 +1102,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               },
               title: Text(
                 'Касание несколькими пальцами ($_multiTouchFingers)',
-                style: const TextStyle(fontWeight: FontWeight.w600),
+                style: TextStyle(fontWeight: FontWeight.w600),
               ),
               subtitle: const Text(
                 'Одновременное нажатие на экран заданным числом пальцев',
@@ -1078,7 +1145,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             const Divider(height: 16),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              secondary: const Icon(Icons.ads_click_rounded, color: Colors.tealAccent),
+              secondary: const Icon(
+                Icons.ads_click_rounded,
+                color: Colors.tealAccent,
+              ),
               value: _wakeOnDoubleTap,
               onChanged: (v) {
                 setState(() => _wakeOnDoubleTap = v);
@@ -1096,7 +1166,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             const Divider(height: 16),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              secondary: const Icon(Icons.touch_app_rounded, color: Colors.tealAccent),
+              secondary: const Icon(
+                Icons.touch_app_rounded,
+                color: Colors.tealAccent,
+              ),
               value: _wakeOnTripleTap,
               onChanged: (v) {
                 setState(() => _wakeOnTripleTap = v);
@@ -1114,7 +1187,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             const Divider(height: 16),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              secondary: const Icon(Icons.swipe_rounded, color: Colors.tealAccent),
+              secondary: const Icon(
+                Icons.swipe_rounded,
+                color: Colors.tealAccent,
+              ),
               value: _wakeOnSwipe,
               onChanged: (v) {
                 setState(() => _wakeOnSwipe = v);
@@ -1132,7 +1208,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             const Divider(height: 16),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              secondary: const Icon(Icons.volume_up_rounded, color: Colors.tealAccent),
+              secondary: const Icon(
+                Icons.volume_up_rounded,
+                color: Colors.tealAccent,
+              ),
               value: _wakeOnVolume,
               onChanged: (v) {
                 setState(() => _wakeOnVolume = v);
@@ -1167,7 +1246,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             const SizedBox(height: 10),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              secondary: const Icon(Icons.phone_in_talk_rounded, color: Colors.tealAccent),
+              secondary: const Icon(
+                Icons.memory_rounded,
+                color: Colors.tealAccent,
+              ),
+              value: _keepAliveForeground,
+              onChanged: (v) {
+                setState(() => _keepAliveForeground = v);
+                _saveSettings();
+              },
+              title: const Text(
+                'Удерживать службу в ОЗУ (Foreground)',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                'Защищает службу от фонового закрытия через несколько дней',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+            const Divider(height: 16),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(
+                Icons.phone_in_talk_rounded,
+                color: Colors.tealAccent,
+              ),
               value: _wakeOnCall,
               onChanged: (v) {
                 setState(() => _wakeOnCall = v);
@@ -1185,7 +1288,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             const Divider(height: 16),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              secondary: const Icon(Icons.lens_blur_rounded, color: Colors.tealAccent),
+              secondary: const Icon(
+                Icons.lens_blur_rounded,
+                color: Colors.tealAccent,
+              ),
               value: _showIndicator,
               onChanged: (v) {
                 setState(() => _showIndicator = v);
@@ -1221,13 +1327,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             Text(
               'Установлена версия: v$_appVersion (сборка $_appBuildNumber)\n'
               'Источник обновлений: github.com/$kGithubOwner/$kGithubRepo',
-              style: const TextStyle(fontSize: 13, color: Colors.white70, height: 1.4),
+              style: const TextStyle(
+                fontSize: 13,
+                color: Colors.white70,
+                height: 1.4,
+              ),
             ),
             if (_updateError != null) ...[
               const SizedBox(height: 8),
               Text(
                 _updateError!,
-                style: const TextStyle(fontSize: 12, color: Colors.orangeAccent),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.orangeAccent,
+                ),
               ),
             ],
             const SizedBox(height: 12),
